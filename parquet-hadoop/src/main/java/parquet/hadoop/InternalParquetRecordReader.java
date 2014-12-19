@@ -15,13 +15,8 @@
  */
 package parquet.hadoop;
 
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
-
 import parquet.Log;
 import parquet.column.ColumnDescriptor;
 import parquet.column.page.PageReadStore;
@@ -38,6 +33,10 @@ import parquet.io.api.RecordMaterializer;
 import parquet.schema.GroupType;
 import parquet.schema.MessageType;
 import parquet.schema.Type;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
 
 import static java.lang.String.format;
 import static parquet.Log.DEBUG;
@@ -167,6 +166,30 @@ class InternalParquetRecordReader<T> {
       total += block.getRowCount();
     }
     LOG.info("RecordReader initialized will read a total of " + total + " records.");
+  }
+
+  /**
+   * @param firstBlock The first block that this reader is going to read
+   * @param lastBlock The last block that this reader is going to read
+   * @throws IOException
+   */
+  public void initialize(MessageType requestedSchema, MessageType fileSchema,
+      Map<String, String> extraMetadata, Map<String, String> readSupportMetadata,
+      Path file, List<BlockMetaData> blocks, Configuration configuration, int firstBlock,
+      int lastBlock)
+      throws IOException {
+    initialize(requestedSchema, fileSchema, extraMetadata, readSupportMetadata, file, blocks, configuration);
+    total = 0;
+    if (firstBlock < 0 || firstBlock > blocks.size())
+      throw new IOException("starting block out of bounds");
+    if (lastBlock < 0 || lastBlock >= blocks.size() || lastBlock < firstBlock)
+      throw new IOException("ending block out of bounds");
+    for (int i=firstBlock; i<=lastBlock; i++) {
+      total += blocks.get(i).getRowCount();
+    }
+    List<ColumnDescriptor> columns = requestedSchema.getColumns();
+    reader = new ParquetFileReader(configuration, file, blocks, columns, firstBlock, lastBlock);
+    LOG.info("Optimized RecordReader initialized will read a total of " + total + " records.");
   }
 
   private boolean contains(GroupType group, String[] path, int index) {

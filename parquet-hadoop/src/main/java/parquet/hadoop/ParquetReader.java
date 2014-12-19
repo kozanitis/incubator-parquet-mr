@@ -15,21 +15,10 @@
  */
 package parquet.hadoop;
 
-import static parquet.Preconditions.checkNotNull;
-
-import java.io.Closeable;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-
 import parquet.filter.UnboundRecordFilter;
 import parquet.filter2.compat.FilterCompat;
 import parquet.filter2.compat.FilterCompat.Filter;
@@ -40,6 +29,16 @@ import parquet.hadoop.api.ReadSupport.ReadContext;
 import parquet.hadoop.metadata.BlockMetaData;
 import parquet.hadoop.metadata.GlobalMetaData;
 import parquet.schema.MessageType;
+
+import java.io.Closeable;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static parquet.Preconditions.checkNotNull;
 
 /**
  * Read records from a Parquet file.
@@ -55,6 +54,10 @@ public class ParquetReader<T> implements Closeable {
   private final Filter filter;
 
   private InternalParquetRecordReader<T> reader;
+  private int firstBlock;
+  private int lastBlock;
+  private boolean hasFirstBlock;
+  private boolean hasLastBlock;
 
   /**
    * @param file the file to read
@@ -120,6 +123,23 @@ public class ParquetReader<T> implements Closeable {
     MessageType schema = globalMetaData.getSchema();
     Map<String, Set<String>> extraMetadata = globalMetaData.getKeyValueMetaData();
     readContext = readSupport.init(new InitContext(conf, extraMetadata, schema));
+    hasFirstBlock = false;
+    hasLastBlock = false;
+  }
+
+  private ParquetReader(Configuration conf,
+                       Path file,
+                       ReadSupport<T> readSupport,
+                       Filter filter,
+                       int startingBlock,
+                       int endingBlock,
+                       boolean hasFirst,
+                       boolean hasLast) throws IOException {
+    this(conf, file, readSupport, filter);
+    firstBlock = startingBlock;
+    lastBlock = endingBlock;
+    hasFirstBlock = hasFirst;
+    hasLastBlock = hasLast;
   }
 
   /**
@@ -131,7 +151,7 @@ public class ParquetReader<T> implements Closeable {
       if (reader != null && reader.nextKeyValue()) {
         return reader.getCurrentValue();
       } else {
-        initReader();
+        initReader(); ////modify this with start/end blocks
         return reader == null ? null : read();
       }
     } catch (InterruptedException e) {
@@ -152,9 +172,21 @@ public class ParquetReader<T> implements Closeable {
       List<BlockMetaData> filteredBlocks = RowGroupFilter.filterRowGroups(filter, blocks, footer.getParquetMetadata().getFileMetaData().getSchema());
 
       reader = new InternalParquetRecordReader<T>(readSupport, filter);
-      reader.initialize(
+      if(hasFirstBlock && hasLastBlock) {
+        reader.initialize(
           readContext.getRequestedSchema(), globalMetaData.getSchema(), footer.getParquetMetadata().getFileMetaData().getKeyValueMetaData(),
-          readContext.getReadSupportMetadata(), footer.getFile(), filteredBlocks, conf);
+          readContext.getReadSupportMetadata(), footer.getFile(), filteredBlocks, conf, firstBlock, lastBlock);
+      }
+      else if(hasFirstBlock) {
+        reader.initialize(
+          readContext.getRequestedSchema(), globalMetaData.getSchema(), footer.getParquetMetadata().getFileMetaData().getKeyValueMetaData(),
+          readContext.getReadSupportMetadata(), footer.getFile(), filteredBlocks, conf, firstBlock, blocks.size() - 1);
+      }
+      else {
+        reader.initialize(
+            readContext.getRequestedSchema(), globalMetaData.getSchema(), footer.getParquetMetadata().getFileMetaData().getKeyValueMetaData(),
+            readContext.getReadSupportMetadata(), footer.getFile(), filteredBlocks, conf);
+      }
     }
   }
 
@@ -174,12 +206,18 @@ public class ParquetReader<T> implements Closeable {
     private final Path file;
     private Configuration conf;
     private Filter filter;
+    private int startingBlock;
+    private int finalBlock;
+    private boolean hasStartingBlock;
+    private boolean hasFinalBlock;
 
     private Builder(ReadSupport<T> readSupport, Path path) {
       this.readSupport = checkNotNull(readSupport, "readSupport");
       this.file = checkNotNull(path, "path");
       this.conf = new Configuration();
       this.filter = FilterCompat.NOOP;
+      this.hasFinalBlock = false;
+      this.hasStartingBlock = false;
     }
 
     public Builder<T> withConf(Configuration conf) {
@@ -192,8 +230,25 @@ public class ParquetReader<T> implements Closeable {
       return this;
     }
 
+    public Builder<T> withFirstBlock(int blockId) {
+      this.startingBlock = blockId;
+      this.hasStartingBlock = true;
+      return this;
+    }
+
+    public Builder<T> withLastBlock(int blockId) {
+      this.finalBlock = blockId;
+      this.hasFinalBlock = true;
+      return this;
+    }
+
     public ParquetReader<T> build() throws IOException {
-      return new ParquetReader<T>(conf, file, readSupport, filter);
+      if (hasFinalBlock && hasStartingBlock)
+        return new ParquetReader<T>(conf, file, readSupport, filter, startingBlock, finalBlock, true, true);
+      else if(hasStartingBlock)
+        return new ParquetReader<T>(conf, file, readSupport, filter, startingBlock, -1, true, false);
+      else
+        return new ParquetReader<T>(conf, file, readSupport, filter);
     }
   }
 }

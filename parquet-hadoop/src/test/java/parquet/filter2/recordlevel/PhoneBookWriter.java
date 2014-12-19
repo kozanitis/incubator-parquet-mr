@@ -1,13 +1,7 @@
 package parquet.filter2.recordlevel;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
-
 import parquet.example.data.Group;
 import parquet.example.data.simple.SimpleGroup;
 import parquet.filter2.compat.FilterCompat.Filter;
@@ -17,6 +11,11 @@ import parquet.hadoop.example.GroupReadSupport;
 import parquet.hadoop.example.GroupWriteSupport;
 import parquet.schema.MessageType;
 import parquet.schema.MessageTypeParser;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 public class PhoneBookWriter {
   private static final String schemaString =
@@ -229,6 +228,30 @@ public class PhoneBookWriter {
         ParquetReader.builder(new GroupReadSupport(), new Path(f.getAbsolutePath()))
                      .withConf(conf)
                      .withFilter(filter)
+                     .build();
+
+    Group current;
+    List<Group> users = new ArrayList<Group>();
+
+    current = reader.read();
+    while (current != null) {
+      users.add(current);
+      current = reader.read();
+    }
+
+    return users;
+  }
+
+  public static List<Group> readFile(File f, Filter filter, int firstBlock, int lastBlock) throws IOException {
+    Configuration conf = new Configuration();
+    GroupWriteSupport.setSchema(schema, conf);
+
+    ParquetReader<Group> reader =
+        ParquetReader.builder(new GroupReadSupport(), new Path(f.getAbsolutePath()))
+                     .withConf(conf)
+                     .withFilter(filter)
+                     .withFirstBlock(firstBlock)
+                     .withLastBlock(lastBlock)
                      .build();
 
     Group current;

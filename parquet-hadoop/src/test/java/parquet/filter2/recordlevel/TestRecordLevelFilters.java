@@ -1,15 +1,7 @@
 package parquet.filter2.recordlevel;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
-
 import org.junit.BeforeClass;
 import org.junit.Test;
-
 import parquet.example.data.Group;
 import parquet.filter2.compat.FilterCompat;
 import parquet.filter2.predicate.FilterPredicate;
@@ -21,6 +13,13 @@ import parquet.filter2.recordlevel.PhoneBookWriter.Location;
 import parquet.filter2.recordlevel.PhoneBookWriter.PhoneNumber;
 import parquet.filter2.recordlevel.PhoneBookWriter.User;
 import parquet.io.api.Binary;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static parquet.filter2.predicate.FilterApi.and;
@@ -56,7 +55,7 @@ public class TestRecordLevelFilters {
 
     users.add(new User(30, null, Arrays.asList(new PhoneNumber(1111111111L, "home")), null));
 
-    for (int i = 100; i < 200; i++) {
+    for (int i = 100; i < 10000; i++) { //originally i<200
       Location location = null;
       if (i % 3 == 1) {
         location = new Location((double)i, (double)i*2);
@@ -130,7 +129,7 @@ public class TestRecordLevelFilters {
 
     FilterPredicate pred = notEq(name, null);
 
-    List<Group> found = PhoneBookWriter.readFile(phonebookFile, FilterCompat.get(pred));
+    List<Group> found = PhoneBookWriter.readFile(phonebookFile, FilterCompat.get(pred), 1, 1);
 
     assertFilter(found, new UserFilter() {
       @Override
@@ -139,6 +138,7 @@ public class TestRecordLevelFilters {
       }
     });
   }
+
 
   public static class StartWithP extends UserDefinedPredicate<Binary> {
 

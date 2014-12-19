@@ -15,42 +15,12 @@
  */
 package parquet.hadoop;
 
-import static parquet.Log.DEBUG;
-import static parquet.bytes.BytesUtils.readIntLittleEndian;
-import static parquet.format.converter.ParquetMetadataConverter.NO_FILTER;
-import static parquet.format.converter.ParquetMetadataConverter.SKIP_ROW_GROUPS;
-import static parquet.format.converter.ParquetMetadataConverter.fromParquetStatistics;
-import static parquet.hadoop.ParquetFileWriter.MAGIC;
-import static parquet.hadoop.ParquetFileWriter.PARQUET_COMMON_METADATA_FILE;
-import static parquet.hadoop.ParquetFileWriter.PARQUET_METADATA_FILE;
-
-import java.io.ByteArrayInputStream;
-import java.io.Closeable;
-import java.io.IOException;
-import java.io.SequenceInputStream;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
-
 import parquet.Log;
 import parquet.bytes.BytesInput;
 import parquet.column.ColumnDescriptor;
@@ -74,6 +44,35 @@ import parquet.hadoop.metadata.ColumnChunkMetaData;
 import parquet.hadoop.metadata.ParquetMetadata;
 import parquet.hadoop.util.counters.BenchmarkCounter;
 import parquet.io.ParquetDecodingException;
+
+import java.io.ByteArrayInputStream;
+import java.io.Closeable;
+import java.io.IOException;
+import java.io.SequenceInputStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+import static parquet.Log.DEBUG;
+import static parquet.bytes.BytesUtils.readIntLittleEndian;
+import static parquet.format.converter.ParquetMetadataConverter.NO_FILTER;
+import static parquet.format.converter.ParquetMetadataConverter.SKIP_ROW_GROUPS;
+import static parquet.format.converter.ParquetMetadataConverter.fromParquetStatistics;
+import static parquet.hadoop.ParquetFileWriter.MAGIC;
+import static parquet.hadoop.ParquetFileWriter.PARQUET_COMMON_METADATA_FILE;
+import static parquet.hadoop.ParquetFileWriter.PARQUET_METADATA_FILE;
 
 /**
  * Internal implementation of the Parquet file reader as a block container
@@ -440,6 +439,7 @@ public class ParquetFileReader implements Closeable {
   private final FSDataInputStream f;
   private final Path filePath;
   private int currentBlock = 0;
+  private int finalBlock = 0;
   private final Map<ColumnPath, ColumnDescriptor> paths = new HashMap<ColumnPath, ColumnDescriptor>();
 
   /**
@@ -458,7 +458,18 @@ public class ParquetFileReader implements Closeable {
       paths.put(ColumnPath.get(col.getPath()), col);
     }
     this.codecFactory = new CodecFactory(configuration);
+    finalBlock = blocks.size() - 1;
   }
+  public ParquetFileReader(Configuration configuration, Path filePath, List<BlockMetaData> blocks, List<ColumnDescriptor> columns, int firstBlock, int lastBlock) throws IOException {
+    this(configuration, filePath, blocks, columns);
+    currentBlock = firstBlock;
+    finalBlock = lastBlock;
+  }
+
+
+
+
+
 
   /**
    * Reads all the columns requested from the row group at the current file position.

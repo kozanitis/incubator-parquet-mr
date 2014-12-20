@@ -15,17 +15,17 @@
  */
 package parquet.hadoop;
 
-import java.io.Closeable;
-import java.io.IOException;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
-
 import parquet.column.ParquetProperties;
 import parquet.column.ParquetProperties.WriterVersion;
 import parquet.hadoop.api.WriteSupport;
 import parquet.hadoop.metadata.CompressionCodecName;
 import parquet.schema.MessageType;
+
+import java.io.Closeable;
+import java.io.IOException;
+import java.util.Map;
 
 /**
  * Write records to a Parquet file.
@@ -192,6 +192,64 @@ public class ParquetWriter<T> implements Closeable {
         writerVersion);
   }
 
+   /**
+   * Create a new ParquetWriter.
+   *
+   * @param file the file to create
+   * @param writeSupport the implementation to write a record to a RecordConsumer
+   * @param compressionCodecName the compression codec to use
+   * @param blockSize the block size threshold
+   * @param pageSize the page size threshold
+   * @param dictionaryPageSize the page size threshold for the dictionary pages
+   * @param enableDictionary to turn dictionary encoding on
+   * @param validating to turn on validation using the schema
+   * @param writerVersion version of parquetWriter from {@link ParquetProperties.WriterVersion}
+   * @param conf Hadoop configuration to use while accessing the filesystem
+   * @param userDefinedMetadataKey User defined metadata key
+   * @param userDefinedMetadataVal User defined metadata val
+   * @throws IOException
+   */
+  public ParquetWriter(
+      Path file,
+      WriteSupport<T> writeSupport,
+      CompressionCodecName compressionCodecName,
+      int blockSize,
+      int pageSize,
+      int dictionaryPageSize,
+      boolean enableDictionary,
+      boolean validating,
+      WriterVersion writerVersion,
+      Configuration conf,
+      String userDefinedMetadataKey,
+      String userDefinedMetadataVal) throws IOException {
+
+    WriteSupport.WriteContext writeContext = writeSupport.init(conf);
+    MessageType schema = writeContext.getSchema();
+
+    ParquetFileWriter fileWriter = new ParquetFileWriter(conf, schema, file);
+    fileWriter.start();
+
+    Map<String, String> metadataMap = writeContext.getExtraMetaData();
+    if(metadataMap.containsKey(userDefinedMetadataKey))
+      throw new IOException("User provided metadata key conflicts with existing metadata");
+    metadataMap.put(userDefinedMetadataKey, userDefinedMetadataVal);
+
+    CodecFactory codecFactory = new CodecFactory(conf);
+    CodecFactory.BytesCompressor compressor =	codecFactory.getCompressor(compressionCodecName, 0);
+    this.writer = new InternalParquetRecordWriter<T>(
+        fileWriter,
+        writeSupport,
+        schema,
+        metadataMap,
+        blockSize,
+        pageSize,
+        compressor,
+        dictionaryPageSize,
+        enableDictionary,
+        validating,
+        writerVersion);
+  }
+
   /**
    * Create a new ParquetWriter.  The default block size is 50 MB.The default
    * page size is 1 MB.  Default compression is no compression. Dictionary encoding is disabled.
@@ -215,6 +273,36 @@ public class ParquetWriter<T> implements Closeable {
         DEFAULT_IS_VALIDATING_ENABLED,
         DEFAULT_WRITER_VERSION,
         conf);
+  }
+  //Pass blockSize as input to ParquetWriter.
+  public ParquetWriter(Path file, Configuration conf, WriteSupport<T> writeSupport, int blockSize) throws IOException {
+    this(file,
+        writeSupport,
+        DEFAULT_COMPRESSION_CODEC_NAME,
+        blockSize,
+        DEFAULT_PAGE_SIZE,
+        DEFAULT_PAGE_SIZE,
+        DEFAULT_IS_DICTIONARY_ENABLED,
+        DEFAULT_IS_VALIDATING_ENABLED,
+        DEFAULT_WRITER_VERSION,
+        conf
+    );
+  }
+  //Pass user defined metadata to ParquetWriter.
+  public ParquetWriter(Path file, Configuration conf, WriteSupport<T> writeSupport, int blockSize, String userMetaDataKey, String userMetaDataVal) throws IOException {
+    this(file,
+        writeSupport,
+        DEFAULT_COMPRESSION_CODEC_NAME,
+        blockSize,
+        DEFAULT_PAGE_SIZE,
+        DEFAULT_PAGE_SIZE,
+        DEFAULT_IS_DICTIONARY_ENABLED,
+        DEFAULT_IS_VALIDATING_ENABLED,
+        DEFAULT_WRITER_VERSION,
+        conf,
+        userMetaDataKey,
+        userMetaDataVal
+    );
   }
 
   public void write(T object) throws IOException {

@@ -32,6 +32,7 @@ import parquet.schema.MessageType;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
@@ -58,6 +59,8 @@ public class ParquetReader<T> implements Closeable {
   private int lastBlock;
   private boolean hasFirstBlock;
   private boolean hasLastBlock;
+  private final List<BlockMetaData> parquetBlocks;
+
 
   /**
    * @param file the file to read
@@ -125,6 +128,7 @@ public class ParquetReader<T> implements Closeable {
     readContext = readSupport.init(new InitContext(conf, extraMetadata, schema));
     hasFirstBlock = false;
     hasLastBlock = false;
+    this.parquetBlocks = new ArrayList<BlockMetaData>();
   }
 
   private ParquetReader(Configuration conf,
@@ -151,7 +155,7 @@ public class ParquetReader<T> implements Closeable {
       if (reader != null && reader.nextKeyValue()) {
         return reader.getCurrentValue();
       } else {
-        initReader(); ////modify this with start/end blocks
+        initReader();
         return reader == null ? null : read();
       }
     } catch (InterruptedException e) {
@@ -172,6 +176,7 @@ public class ParquetReader<T> implements Closeable {
       List<BlockMetaData> filteredBlocks = RowGroupFilter.filterRowGroups(filter, blocks, footer.getParquetMetadata().getFileMetaData().getSchema());
 
       reader = new InternalParquetRecordReader<T>(readSupport, filter);
+      this.parquetBlocks.addAll(blocks);
       if(hasFirstBlock && hasLastBlock) {
         reader.initialize(
           readContext.getRequestedSchema(), globalMetaData.getSchema(), footer.getParquetMetadata().getFileMetaData().getKeyValueMetaData(),
@@ -188,6 +193,13 @@ public class ParquetReader<T> implements Closeable {
             readContext.getReadSupportMetadata(), footer.getFile(), filteredBlocks, conf);
       }
     }
+  }
+
+  public List<BlockMetaData> getBlocks() throws IOException {
+    if (parquetBlocks.isEmpty()) {
+      throw new IOException("Empty block information. Initialize parquet reader first");
+    }
+    return parquetBlocks;
   }
 
   @Override

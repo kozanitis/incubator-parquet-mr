@@ -5,6 +5,7 @@ import org.junit.Test;
 import parquet.example.data.Group;
 import parquet.filter2.compat.FilterCompat;
 import parquet.filter2.predicate.FilterPredicate;
+import parquet.filter2.predicate.Operators;
 import parquet.filter2.predicate.Operators.BinaryColumn;
 import parquet.filter2.predicate.Operators.DoubleColumn;
 import parquet.filter2.predicate.Statistics;
@@ -27,6 +28,7 @@ import static parquet.filter2.predicate.FilterApi.binaryColumn;
 import static parquet.filter2.predicate.FilterApi.doubleColumn;
 import static parquet.filter2.predicate.FilterApi.eq;
 import static parquet.filter2.predicate.FilterApi.gt;
+import static parquet.filter2.predicate.FilterApi.longColumn;
 import static parquet.filter2.predicate.FilterApi.not;
 import static parquet.filter2.predicate.FilterApi.notEq;
 import static parquet.filter2.predicate.FilterApi.or;
@@ -75,7 +77,7 @@ public class TestRecordLevelFilters {
   @BeforeClass
   public static void setup() throws IOException{
     users = makeUsers();
-    phonebookFile = PhoneBookWriter.writeToFile(users);
+    phonebookFile = PhoneBookWriter.writeToFile(users, 131072);
   }
 
   private static interface UserFilter {
@@ -92,8 +94,28 @@ public class TestRecordLevelFilters {
     return expected;
   }
 
+  private static List<Group> getExpected(UserFilter f, List<User> refinedBlockUsers) {
+    List<Group> expected = new ArrayList<Group>();
+    for (User u : refinedBlockUsers) {
+      if (f.keep(u)) {
+        expected.add(PhoneBookWriter.groupFromUser(u));
+      }
+    }
+    return expected;
+  }
+
   private static void assertFilter(List<Group> found, UserFilter f) {
     List<Group> expected = getExpected(f);
+    assertEquals(expected.size(), found.size());
+    Iterator<Group> expectedIter = expected.iterator();
+    Iterator<Group> foundIter = found.iterator();
+    while(expectedIter.hasNext()) {
+      assertEquals(expectedIter.next().toString(), foundIter.next().toString());
+    }
+  }
+
+  private static void assertFilter(List<Group> found, UserFilter f, List<User> userSource) {
+    List<Group> expected = getExpected(f, userSource);
     assertEquals(expected.size(), found.size());
     Iterator<Group> expectedIter = expected.iterator();
     Iterator<Group> foundIter = found.iterator();
@@ -129,7 +151,7 @@ public class TestRecordLevelFilters {
 
     FilterPredicate pred = notEq(name, null);
 
-    List<Group> found = PhoneBookWriter.readFile(phonebookFile, FilterCompat.get(pred), 1, 1);
+    List<Group> found = PhoneBookWriter.readFile(phonebookFile, FilterCompat.get(pred));
 
     assertFilter(found, new UserFilter() {
       @Override
@@ -139,6 +161,33 @@ public class TestRecordLevelFilters {
     });
   }
 
+  @Test
+  public void testBlockRandomAccess() throws Exception {
+    /*BinaryColumn name = binaryColumn("name");
+
+    FilterPredicate pred = notEq(name, null);*/
+    Operators.LongColumn id = longColumn("id");
+
+    FilterPredicate pred = eq(id, 8354L);
+    int startingBlock = 1;
+    int endingBlock = 1;
+
+    List<Group> found = PhoneBookWriter.readFile(phonebookFile, FilterCompat.get(pred), 1, 1);
+    List<PhoneBookWriter.IndexedUser> indexedUsers = PhoneBookWriter.mapUsersWithIndex(users, phonebookFile);
+    ArrayList<User> usersInBlocks = new ArrayList<User>();
+
+    for (PhoneBookWriter.IndexedUser indexedUser : indexedUsers) {
+      if (indexedUser.getIndex() >= startingBlock && indexedUser.getIndex() <= endingBlock)
+        usersInBlocks.add(indexedUser.getUser());
+    }
+
+    assertFilter(found, new UserFilter() {
+      @Override
+      public boolean keep(User u) {
+        return u.getName() != null;
+      }
+    }, usersInBlocks);
+  }
 
   public static class StartWithP extends UserDefinedPredicate<Binary> {
 

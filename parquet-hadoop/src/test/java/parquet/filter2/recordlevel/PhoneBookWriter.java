@@ -9,6 +9,7 @@ import parquet.hadoop.ParquetReader;
 import parquet.hadoop.ParquetWriter;
 import parquet.hadoop.example.GroupReadSupport;
 import parquet.hadoop.example.GroupWriteSupport;
+import parquet.hadoop.metadata.BlockMetaData;
 import parquet.schema.MessageType;
 import parquet.schema.MessageTypeParser;
 
@@ -166,6 +167,22 @@ public class PhoneBookWriter {
     }
   }
 
+  public static class IndexedUser {
+    private int index;
+    private User user;
+    public IndexedUser(int index, User usr) {
+      this.index = index;
+      this.user = usr;
+    }
+    public int getIndex() {
+      return index;
+    }
+    public User getUser() {
+      return user;
+    }
+  }
+
+
   public static SimpleGroup groupFromUser(User user) {
     SimpleGroup root = new SimpleGroup(schema);
     root.append("id", user.getId());
@@ -197,14 +214,14 @@ public class PhoneBookWriter {
     return root;
   }
 
-  public static File writeToFile(List<User> users) throws IOException {
+  public static File writeToFile(List<User> users, int blockSize) throws IOException {
     File f = File.createTempFile("phonebook", ".parquet");
     f.deleteOnExit();
     if (!f.delete()) {
       throw new IOException("couldn't delete tmp file" + f);
     }
 
-    writeToFile(f, users);
+    writeToFile(f, users, blockSize);
 
     return f;
   }
@@ -218,6 +235,62 @@ public class PhoneBookWriter {
       writer.write(groupFromUser(u));
     }
     writer.close();
+  }
+
+  private static void writeToFile(File f, List<User> users, int blockSize) throws IOException {
+    Configuration conf = new Configuration();
+    GroupWriteSupport.setSchema(schema, conf);
+
+    ParquetWriter<Group> writer = new ParquetWriter<Group>(new Path(f.getAbsolutePath()), conf, new GroupWriteSupport(), blockSize);
+    for (User u : users) {
+      writer.write(groupFromUser(u));
+    }
+    writer.close();
+  }
+  //adds provided metadata to file
+  private static void writeToFile(File f, List<User> users, int blockSize, String metadataString) throws IOException {
+    Configuration conf = new Configuration();
+    GroupWriteSupport.setSchema(schema, conf);
+
+    ParquetWriter<Group> writer = new ParquetWriter<Group>(new Path(f.getAbsolutePath()), conf, new GroupWriteSupport(), blockSize);
+    for (User u : users) {
+      writer.write(groupFromUser(u));
+    }
+    writer.close();
+  }
+
+  public static List<BlockMetaData> getBlocks(File f) throws IOException {
+    Configuration conf = new Configuration();
+    GroupWriteSupport.setSchema(schema, conf);
+
+    ParquetReader<Group> reader =
+        ParquetReader.builder(new GroupReadSupport(), new Path(f.getAbsolutePath()))
+                     .withConf(conf)
+                     .build();
+    reader.read(); //we have to read once so that reader gets initialized
+    return reader.getBlocks();
+
+  }
+
+  public static List<IndexedUser> mapUsersWithIndex(List<User> users, File f) throws IOException {
+    List<BlockMetaData> blocks = getBlocks(f);
+    ArrayList<IndexedUser> ret = new ArrayList<IndexedUser>();
+    long ttlRows = 0;
+    for (BlockMetaData blk : blocks){
+      ttlRows += blk.getRowCount();
+    }
+    assert (ttlRows == users.size());
+    int currentBlock = -1;
+    long rowsLeft = 0;
+    for (User u: users) {
+      if (rowsLeft <= 0) {
+        currentBlock += 1;
+        rowsLeft = blocks.get(currentBlock).getRowCount();
+      }
+      ret.add(new IndexedUser(currentBlock, u));
+      rowsLeft -= 1;
+    }
+    return ret;
   }
 
   public static List<Group> readFile(File f, Filter filter) throws IOException {
@@ -265,6 +338,10 @@ public class PhoneBookWriter {
 
     return users;
   }
+
+
+
+
 
   public static void main(String[] args) throws IOException {
     File f = new File(args[0]);
